@@ -28,6 +28,7 @@ create table profissionais (
 create table pacientes (
   id               uuid primary key default gen_random_uuid(),
   nome             text not null,
+  telefone         text,
   profissional_id  uuid references profissionais(id),
   tipo_valor       text not null default 'novo' check (tipo_valor in ('antigo','novo')),
   valor            numeric(10,2) not null default 115,   -- editável por paciente
@@ -60,6 +61,7 @@ create table agendamentos (
                     check (status in ('agendado','veio','nao_veio','remarcado')),
   valor_cobrado   numeric(10,2),                 -- snapshot do valor ao marcar 'veio'
   pago            boolean not null default false, -- usado por paga_na_hora
+  evolucao        text,                           -- anotação clínica da sessão (prontuário)
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
 );

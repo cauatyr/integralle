@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react'
-import { Plus, Pencil, Trash2, Search } from 'lucide-react'
-import { Header, Modal, Vazio, Carregando } from '../components/ui'
+import { Plus, Pencil, Trash2, Search, History, Phone } from 'lucide-react'
+import { Header, Modal, Vazio, Carregando, SkeletonLista } from '../components/ui'
+import { useUI } from '../components/Toaster'
 import {
   useExcluirPaciente,
+  useHistoricoPaciente,
   useHorariosFixos,
   usePacientes,
   useProfissionais,
@@ -10,7 +12,7 @@ import {
   useSalvarPaciente,
 } from '../hooks/data'
 import type { HorarioFixo, ModoCobranca, Paciente, TipoValor } from '../types/db'
-import { moeda, abrevDiaSemana } from '../lib/format'
+import { moeda, abrevDiaSemana, dataLonga } from '../lib/format'
 
 const MODOS: { v: ModoCobranca; label: string; desc: string }[] = [
   { v: 'fechamento', label: 'Fechamento', desc: 'Gera relação no fim do ciclo' },
@@ -25,9 +27,11 @@ export function Pacientes() {
   const { data: profissionais = [] } = useProfissionais()
   const { data: horarios = [] } = useHorariosFixos()
   const excluir = useExcluirPaciente()
+  const { toast, confirmar } = useUI()
 
   const [busca, setBusca] = useState('')
   const [editando, setEditando] = useState<Paciente | null>(null)
+  const [historico, setHistorico] = useState<Paciente | null>(null)
   const [novo, setNovo] = useState(false)
 
   const corProf = (id: string) =>
@@ -65,7 +69,7 @@ export function Pacientes() {
       </div>
 
       {isLoading ? (
-        <Carregando />
+        <SkeletonLista />
       ) : filtrados.length === 0 ? (
         <Vazio>Nenhum paciente. Toque em “Novo” para cadastrar.</Vazio>
       ) : (
@@ -86,17 +90,37 @@ export function Pacientes() {
                   <span>{moeda(p.valor)}</span>
                   <span>·</span>
                   <span>{MODOS.find((m) => m.v === p.modo_cobranca)?.label}</span>
+                  {p.telefone && (
+                    <>
+                      <span>·</span>
+                      <span className="flex items-center gap-0.5">
+                        <Phone size={10} /> {p.telefone}
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
-              <button onClick={() => setEditando(p)} className="p-2 text-zinc-400 hover:text-ouro">
+              <button onClick={() => setHistorico(p)} className="p-2 text-zinc-400 hover:text-ouro" title="Histórico">
+                <History size={17} />
+              </button>
+              <button onClick={() => setEditando(p)} className="p-2 text-zinc-400 hover:text-ouro" title="Editar">
                 <Pencil size={17} />
               </button>
               <button
-                onClick={() => {
-                  if (confirm(`Excluir ${p.nome}? Isso remove também os agendamentos dele.`))
+                onClick={async () => {
+                  const ok = await confirmar({
+                    titulo: `Excluir ${p.nome}?`,
+                    mensagem: 'Isso remove também os agendamentos dele.',
+                    confirmar: 'Excluir',
+                    perigo: true,
+                  })
+                  if (ok) {
                     excluir.mutate(p.id)
+                    toast('Paciente excluído')
+                  }
                 }}
                 className="p-2 text-zinc-400 hover:text-red-400"
+                title="Excluir"
               >
                 <Trash2 size={17} />
               </button>
@@ -117,6 +141,95 @@ export function Pacientes() {
           }}
         />
       )}
+
+      {historico && (
+        <HistoricoModal paciente={historico} onFechar={() => setHistorico(null)} />
+      )}
+    </div>
+  )
+}
+
+function HistoricoModal({ paciente, onFechar }: { paciente: Paciente; onFechar: () => void }) {
+  const { data: ags = [], isLoading } = useHistoricoPaciente(paciente.id)
+  const hoje = new Date().toISOString().slice(0, 10)
+
+  const veio = ags.filter((a) => a.status === 'veio')
+  const faltas = ags.filter((a) => a.status === 'nao_veio')
+  const totalAtendido = veio.reduce((s, a) => s + (a.valor_cobrado ?? 0), 0)
+  const proxima = ags
+    .filter((a) => a.status === 'agendado' && a.data >= hoje)
+    .sort((a, b) => (a.data + a.hora).localeCompare(b.data + b.hora))[0]
+
+  const rotulo: Record<string, { txt: string; cls: string }> = {
+    veio: { txt: 'Veio', cls: 'text-emerald-400' },
+    nao_veio: { txt: 'Faltou', cls: 'text-red-400' },
+    agendado: { txt: 'Agendado', cls: 'text-zinc-400' },
+    remarcado: { txt: 'Remarcado', cls: 'text-amber-400' },
+  }
+
+  return (
+    <Modal aberto onFechar={onFechar} titulo={`Histórico — ${paciente.nome}`}>
+      {isLoading ? (
+        <Carregando />
+      ) : (
+        <div className="space-y-4">
+          {paciente.telefone && (
+            <div className="text-sm text-zinc-300 flex items-center gap-2">
+              <Phone size={14} className="text-ouro" /> {paciente.telefone}
+            </div>
+          )}
+
+          <div className="grid grid-cols-3 gap-2">
+            <Stat n={veio.length} label="Atendidos" cor="text-emerald-400" />
+            <Stat n={faltas.length} label="Faltas" cor="text-red-400" />
+            <Stat n={moeda(totalAtendido)} label="Total atendido" cor="text-ouro" />
+          </div>
+
+          <div className="card p-3">
+            <div className="text-xs text-zinc-500">Próxima consulta</div>
+            <div className="text-sm font-semibold text-zinc-100">
+              {proxima ? `${dataLonga(proxima.data)} às ${proxima.hora}` : 'Sem agendamento futuro'}
+            </div>
+          </div>
+
+          <div>
+            <div className="label">Atendimentos</div>
+            {ags.length === 0 ? (
+              <Vazio>Nenhum atendimento registrado.</Vazio>
+            ) : (
+              <ul className="space-y-1.5 max-h-72 overflow-y-auto">
+                {ags.map((a) => {
+                  const r = rotulo[a.status]
+                  return (
+                    <li key={a.id} className="border-b border-white/5 py-1.5">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-zinc-300">
+                          {dataLonga(a.data)} · {a.hora}
+                        </span>
+                        <span className={`text-xs font-medium ${r.cls}`}>{r.txt}</span>
+                      </div>
+                      {a.evolucao && (
+                        <p className="text-xs text-zinc-400 mt-1 bg-white/[0.03] border border-white/5 rounded-lg p-2 whitespace-pre-wrap">
+                          {a.evolucao}
+                        </p>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+    </Modal>
+  )
+}
+
+function Stat({ n, label, cor }: { n: number | string; label: string; cor: string }) {
+  return (
+    <div className="card p-2.5 text-center">
+      <div className={`text-lg font-bold ${cor}`}>{n}</div>
+      <div className="text-[10px] text-zinc-500">{label}</div>
     </div>
   )
 }
@@ -133,8 +246,10 @@ function PacienteForm({
   const { data: profissionais = [] } = useProfissionais()
   const salvar = useSalvarPaciente()
   const salvarHorarios = useSalvarHorariosFixos()
+  const { toast } = useUI()
 
   const [nome, setNome] = useState(paciente?.nome ?? '')
+  const [telefone, setTelefone] = useState(paciente?.telefone ?? '')
   const [profissionalId, setProfissionalId] = useState(
     paciente?.profissional_id ?? profissionais[0]?.id ?? '',
   )
@@ -168,6 +283,7 @@ function PacienteForm({
     const salvo = await salvar.mutateAsync({
       ...(paciente?.id ? { id: paciente.id } : {}),
       nome: nome.trim(),
+      telefone: telefone.trim() || null,
       profissional_id: profissionalId,
       tipo_valor: tipoValor,
       valor,
@@ -179,6 +295,7 @@ function PacienteForm({
       ativo: true,
     })
     await salvarHorarios.mutateAsync({ pacienteId: salvo.id, horarios })
+    toast(paciente ? 'Paciente atualizado' : 'Paciente cadastrado')
     onFechar()
   }
 
@@ -192,6 +309,17 @@ function PacienteForm({
         <div>
           <label className="label">Nome</label>
           <input value={nome} onChange={(e) => setNome(e.target.value)} className="w-full" autoFocus />
+        </div>
+
+        <div>
+          <label className="label">Telefone (celular)</label>
+          <input
+            type="tel"
+            value={telefone}
+            onChange={(e) => setTelefone(e.target.value)}
+            className="w-full"
+            placeholder="(00) 00000-0000"
+          />
         </div>
 
         <div>
@@ -340,16 +468,7 @@ function PacienteForm({
                   onChange={(e) =>
                     setHorarios((hs) => hs.map((x, j) => (j === i ? { ...x, hora: e.target.value } : x)))
                   }
-                  className="w-28"
-                />
-                <input
-                  type="number"
-                  value={h.duracao_min}
-                  onChange={(e) =>
-                    setHorarios((hs) => hs.map((x, j) => (j === i ? { ...x, duracao_min: Number(e.target.value) } : x)))
-                  }
-                  className="w-16"
-                  title="minutos"
+                  className="w-32"
                 />
                 <button
                   onClick={() => setHorarios((hs) => hs.filter((_, j) => j !== i))}

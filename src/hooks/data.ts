@@ -160,13 +160,14 @@ export function useSalvarAgendamento() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (a: Partial<Agendamento>) => {
-      const { data, error } = await supabase
-        .from('agendamentos')
-        .upsert(a)
-        .select()
-        .single()
-      if (error) throw error
-      return data as Agendamento
+      // UPDATE quando já existe (permite alteração parcial, ex.: só status no
+      // "remarcar"); INSERT quando é novo. Upsert parcial falharia nos NOT NULL.
+      const { id, ...campos } = a
+      const resp = id
+        ? await supabase.from('agendamentos').update(campos).eq('id', id).select().single()
+        : await supabase.from('agendamentos').insert(a).select().single()
+      if (resp.error) throw resp.error
+      return resp.data as Agendamento
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['agendamentos'] }),
   })
@@ -185,10 +186,12 @@ export function useMarcarPresenca() {
       agendamento,
       paciente,
       status,
+      evolucao,
     }: {
       agendamento: Agendamento
       paciente: Paciente
       status: StatusAgendamento
+      evolucao?: string | null
     }) => {
       const veio = status === 'veio'
       const pagaNaHora = paciente.modo_cobranca === 'paga_na_hora'
@@ -198,6 +201,7 @@ export function useMarcarPresenca() {
           status,
           valor_cobrado: veio ? paciente.valor : null,
           pago: veio && pagaNaHora,
+          ...(evolucao !== undefined ? { evolucao } : {}),
         })
         .eq('id', agendamento.id)
       if (error) throw error
@@ -236,6 +240,38 @@ export function useExcluirAgendamento() {
       if (error) throw error
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['agendamentos'] }),
+  })
+}
+
+/** Insere vários agendamentos de uma vez (gerador de semana). */
+export function useGerarAgendamentos() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (novos: Partial<Agendamento>[]) => {
+      if (!novos.length) return 0
+      const { error } = await supabase.from('agendamentos').insert(novos)
+      if (error) throw error
+      return novos.length
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agendamentos'] }),
+  })
+}
+
+/** Histórico completo de um paciente (todos os atendimentos, mais recente primeiro). */
+export function useHistoricoPaciente(pacienteId: string | null) {
+  return useQuery({
+    queryKey: ['agendamentos', 'historico', pacienteId],
+    enabled: Boolean(pacienteId),
+    queryFn: async (): Promise<Agendamento[]> => {
+      const { data, error } = await supabase
+        .from('agendamentos')
+        .select('*')
+        .eq('paciente_id', pacienteId)
+        .order('data', { ascending: false })
+        .order('hora', { ascending: false })
+      if (error) throw error
+      return data ?? []
+    },
   })
 }
 
@@ -318,6 +354,21 @@ export function useSalvarFechamento() {
         .single()
       if (error) throw error
       return data as Fechamento
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['fechamentos'] }),
+  })
+}
+
+/** Atualiza o status de um fechamento (aberto/enviado/pago) sem reenviar tudo. */
+export function useAtualizarStatusFechamento() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: Fechamento['status'] }) => {
+      const { error } = await supabase
+        .from('fechamentos')
+        .update({ status })
+        .eq('id', id)
+      if (error) throw error
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['fechamentos'] }),
   })

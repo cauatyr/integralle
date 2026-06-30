@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Plus, Trash2, TrendingUp, TrendingDown, Wallet } from 'lucide-react'
-import { Header, Modal, Vazio, Carregando } from '../components/ui'
+import { Header, Modal, Vazio, SkeletonCards } from '../components/ui'
+import { useUI } from '../components/Toaster'
 import {
   useAgendamentos,
   useExcluirLancamento,
@@ -30,6 +31,7 @@ export function Financeiro() {
   const { data: agendamentos = [] } = useAgendamentos(intv.inicio, intv.fim)
   const { data: lancamentos = [], isLoading } = useLancamentos(intv.inicio, intv.fim)
   const excluir = useExcluirLancamento()
+  const { toast } = useUI()
   const [novo, setNovo] = useState(false)
 
   const totaisProf = totaisPorProfissional(agendamentos)
@@ -76,7 +78,7 @@ export function Financeiro() {
       </div>
 
       {isLoading ? (
-        <Carregando />
+        <SkeletonCards n={2} />
       ) : (
         <div className="px-4 space-y-5">
           {/* Faturamento (produção) por profissional */}
@@ -142,7 +144,10 @@ export function Financeiro() {
                       {moeda(l.valor)}
                     </span>
                     <button
-                      onClick={() => excluir.mutate(l.id)}
+                      onClick={() => {
+                        excluir.mutate(l.id)
+                        toast('Lançamento removido')
+                      }}
                       className="p-1.5 text-zinc-500 hover:text-red-400"
                     >
                       <Trash2 size={16} />
@@ -187,6 +192,7 @@ function Mini({
 function ModalLancamento({ onFechar }: { onFechar: () => void }) {
   const salvar = useSalvarLancamento()
   const { data: profissionais = [] } = useProfissionais()
+  const { toast } = useUI()
 
   const [tipo, setTipo] = useState<TipoLancamento>('custo')
   const [valor, setValor] = useState<number>(0)
@@ -205,6 +211,7 @@ function ModalLancamento({ onFechar }: { onFechar: () => void }) {
       data,
       profissional_id: profId || null,
     })
+    toast('Lançamento salvo')
     onFechar()
   }
 

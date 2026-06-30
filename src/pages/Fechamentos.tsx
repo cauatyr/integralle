@@ -1,15 +1,18 @@
 import { useMemo, useState } from 'react'
 import { Copy, Check, FileText, Send, BadgeDollarSign } from 'lucide-react'
-import { Header, Modal, Vazio, Carregando } from '../components/ui'
+import { Header, Modal, Vazio, Carregando, SkeletonLista } from '../components/ui'
+import { useUI } from '../components/Toaster'
 import {
   useAgendamentosPaciente,
+  useAtualizarStatusFechamento,
   useConfig,
+  useFechamentos,
   usePacientes,
   useProfissionais,
   useSalvarFechamento,
   useSalvarLancamento,
 } from '../hooks/data'
-import type { Paciente } from '../types/db'
+import type { Fechamento, Paciente } from '../types/db'
 import { periodoDoCiclo, descricaoCiclo, type Periodo } from '../lib/ciclo'
 import { montarMensagemFechamento } from '../lib/mensagem'
 import { dataCurta, dataLonga, moeda } from '../lib/format'
@@ -27,8 +30,11 @@ export function Fechamentos() {
     <div>
       <Header titulo="Fechamentos" subtitulo={`${elegiveis.length} pacientes com fechamento`} />
 
+      <AReceber />
+
+      <h2 className="text-sm font-bold text-zinc-200 px-4 pt-2">Gerar fechamento</h2>
       {isLoading ? (
-        <Carregando />
+        <SkeletonLista linhas={3} />
       ) : elegiveis.length === 0 ? (
         <Vazio>
           Nenhum paciente com modo “Fechamento”. Configure em Pacientes.
@@ -54,6 +60,84 @@ export function Fechamentos() {
   )
 }
 
+function AReceber() {
+  const { data: fechamentos = [] } = useFechamentos()
+  const { data: pacientes = [] } = usePacientes()
+  const atualizar = useAtualizarStatusFechamento()
+  const salvarLancamento = useSalvarLancamento()
+  const { toast } = useUI()
+  const [mostrarPagos, setMostrarPagos] = useState(false)
+
+  const pendentes = fechamentos.filter((f) => f.status !== 'pago')
+  const pagos = fechamentos.filter((f) => f.status === 'pago')
+  const totalReceber = pendentes.reduce((s, f) => s + Number(f.valor_total), 0)
+  const nome = (id: string) => pacientes.find((p) => p.id === id)?.nome ?? 'Paciente'
+
+  async function marcarPago(f: Fechamento) {
+    await atualizar.mutateAsync({ id: f.id, status: 'pago' })
+    const pac = pacientes.find((p) => p.id === f.paciente_id)
+    await salvarLancamento.mutateAsync({
+      data: f.periodo_fim,
+      tipo: 'entrada',
+      valor: Number(f.valor_total),
+      descricao: `Fechamento ${nome(f.paciente_id)} (${f.qtd} atend.)`,
+      categoria: 'Fechamento',
+      profissional_id: pac?.profissional_id ?? null,
+    })
+    toast('Marcado como pago — entrada lançada')
+  }
+
+  if (fechamentos.length === 0) return null
+
+  return (
+    <div className="px-4 pt-3">
+      <div className="card p-4 mb-2 bg-gradient-to-br from-emerald-500/15 to-transparent border-emerald-500/30">
+        <p className="text-xs text-zinc-400">A receber ({pendentes.length} pendente{pendentes.length === 1 ? '' : 's'})</p>
+        <p className="text-2xl font-extrabold text-emerald-400">{moeda(totalReceber)}</p>
+      </div>
+
+      <ul className="space-y-2">
+        {pendentes.map((f) => (
+          <li key={f.id} className="card p-3 flex items-center gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold text-zinc-100 truncate">{nome(f.paciente_id)}</div>
+              <div className="text-[11px] text-zinc-500">
+                {dataCurta(f.periodo_inicio)}–{dataCurta(f.periodo_fim)} · {f.qtd} atend. · {moeda(Number(f.valor_total))}
+                {f.status === 'enviado' && <span className="text-amber-400"> · enviado</span>}
+              </div>
+            </div>
+            <button
+              onClick={() => marcarPago(f)}
+              className="shrink-0 rounded-lg px-3 py-2 text-xs font-semibold border border-emerald-500/40 bg-emerald-500/10 text-emerald-400 flex items-center gap-1"
+            >
+              <BadgeDollarSign size={14} /> Pago
+            </button>
+          </li>
+        ))}
+      </ul>
+
+      {pagos.length > 0 && (
+        <button
+          onClick={() => setMostrarPagos((v) => !v)}
+          className="text-xs text-zinc-500 mt-2"
+        >
+          {mostrarPagos ? 'Ocultar' : 'Ver'} pagos ({pagos.length})
+        </button>
+      )}
+      {mostrarPagos && (
+        <ul className="space-y-1.5 mt-2">
+          {pagos.map((f) => (
+            <li key={f.id} className="flex items-center justify-between text-xs text-zinc-500 border-b border-white/5 py-1.5">
+              <span>{nome(f.paciente_id)} · {dataCurta(f.periodo_inicio)}–{dataCurta(f.periodo_fim)}</span>
+              <span className="text-emerald-400/70">{moeda(Number(f.valor_total))} ✓</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 function DetalheFechamento({ paciente, onFechar }: { paciente: Paciente; onFechar: () => void }) {
   const periodoAtual = periodoDoCiclo(paciente) ?? {
     inicio: new Date().toISOString().slice(0, 10),
@@ -70,6 +154,7 @@ function DetalheFechamento({ paciente, onFechar }: { paciente: Paciente; onFecha
   )
   const salvarFechamento = useSalvarFechamento()
   const salvarLancamento = useSalvarLancamento()
+  const { toast } = useUI()
 
   const veio = atendimentos.filter((a) => a.status === 'veio').sort((a, b) => a.data.localeCompare(b.data))
   const qtd = veio.length
@@ -85,6 +170,7 @@ function DetalheFechamento({ paciente, onFechar }: { paciente: Paciente; onFecha
     try {
       const { baixarFechamentoPDF } = await import('../pdf/FechamentoPDF')
       await baixarFechamentoPDF({ paciente, atendimentos: veio, periodo, total, qtd })
+      toast('PDF gerado')
     } finally {
       setGerandoPdf(false)
     }
@@ -93,6 +179,7 @@ function DetalheFechamento({ paciente, onFechar }: { paciente: Paciente; onFecha
   async function copiar() {
     await navigator.clipboard.writeText(mensagem)
     setCopiado(true)
+    toast('Mensagem copiada')
     setTimeout(() => setCopiado(false), 2000)
   }
 
@@ -116,6 +203,7 @@ function DetalheFechamento({ paciente, onFechar }: { paciente: Paciente; onFecha
         profissional_id: paciente.profissional_id,
       })
     }
+    toast(status === 'pago' ? 'Fechamento pago — entrada lançada' : 'Marcado como enviado')
     onFechar()
   }
 

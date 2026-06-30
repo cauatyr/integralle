@@ -4,12 +4,12 @@ import {
   Users,
   Receipt,
   Wallet,
-  CheckCircle2,
+  LayoutDashboard,
 } from 'lucide-react'
 
 const itens = [
+  { to: '/inicio', label: 'Início', Icone: LayoutDashboard },
   { to: '/agenda', label: 'Agenda', Icone: CalendarDays },
-  { to: '/dia', label: 'Fim de dia', Icone: CheckCircle2 },
   { to: '/pacientes', label: 'Pacientes', Icone: Users },
   { to: '/fechamentos', label: 'Fechar', Icone: Receipt },
   { to: '/financeiro', label: 'Financeiro', Icone: Wallet },

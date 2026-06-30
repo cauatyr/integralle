@@ -1,5 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <rect width="512" height="512" rx="96" fill="#0A0A0A"/>
-  <circle cx="256" cy="256" r="180" fill="none" stroke="#C9A227" stroke-width="20"/>
-  <path d="M168 344V168h34v176h-34Zm68 0V168h34l68 108V168h34v176h-34l-68-108v108h-34Z" fill="#C9A227"/>
+  <!-- Monograma II (Instituto Integralle), serifa geométrica dourada -->
+  <g fill="#C9A227">
+    <!-- I esquerdo -->
+    <rect x="150" y="150" width="44" height="212"/>
+    <rect x="124" y="150" width="96" height="34"/>
+    <rect x="124" y="328" width="96" height="34"/>
+    <!-- I direito -->
+    <rect x="318" y="150" width="44" height="212"/>
+    <rect x="292" y="150" width="96" height="34"/>
+    <rect x="292" y="328" width="96" height="34"/>
+  </g>
 </svg>

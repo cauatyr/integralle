@@ -16,18 +16,24 @@ import {
   X as XIcon,
   Clock,
   Trash2,
+  CalendarPlus,
 } from 'lucide-react'
-import { Header, Modal, Carregando } from '../components/ui'
+import { Header, Modal, SkeletonLista } from '../components/ui'
+import { useUI } from '../components/Toaster'
 import {
   useAgendamentos,
   useExcluirAgendamento,
+  useGerarAgendamentos,
+  useHorariosFixos,
   useMarcarPresenca,
   usePacientes,
   useProfissionais,
   useSalvarAgendamento,
 } from '../hooks/data'
 import type { Agendamento, Paciente } from '../types/db'
-import { abrevDiaSemana, duracaoLabel, isoLocal } from '../lib/format'
+import { abrevDiaSemana, isoLocal } from '../lib/format'
+
+const DURACAO_PADRAO = 60 // cada atendimento dura 1 hora
 
 export function Agenda() {
   const [semanaRef, setSemanaRef] = useState(new Date())
@@ -43,11 +49,43 @@ export function Agenda() {
 
   const { data: profissionais = [] } = useProfissionais()
   const { data: agendamentos = [], isLoading } = useAgendamentos(inicioIso, fimIso)
+  const { data: pacientes = [] } = usePacientes()
+  const { data: horarios = [] } = useHorariosFixos()
+  const gerar = useGerarAgendamentos()
+  const { toast } = useUI()
 
   const [modal, setModal] = useState<{
     profissionalId: string
     agendamento: Agendamento | null
   } | null>(null)
+
+  async function montarSemana() {
+    const novos = []
+    for (const h of horarios) {
+      if (h.dia_semana < 1 || h.dia_semana > 6) continue // agenda mostra seg–sáb
+      const pac = pacientes.find((p) => p.id === h.paciente_id && p.ativo)
+      if (!pac) continue
+      const dataIso = isoLocal(dias[h.dia_semana - 1])
+      const jaExiste = agendamentos.some(
+        (a) => a.paciente_id === h.paciente_id && a.data === dataIso && a.hora === h.hora,
+      )
+      if (jaExiste) continue
+      novos.push({
+        paciente_id: h.paciente_id,
+        profissional_id: pac.profissional_id,
+        data: dataIso,
+        hora: h.hora,
+        duracao_min: h.duracao_min || 60,
+        status: 'agendado' as const,
+      })
+    }
+    if (novos.length === 0) {
+      toast('Nada a gerar: horários fixos desta semana já estão na agenda.', 'info')
+      return
+    }
+    const n = await gerar.mutateAsync(novos)
+    toast(`${n} atendimento(s) recorrente(s) adicionado(s)`)
+  }
 
   const doDia = (d: Date) =>
     agendamentos.filter((a) => isSameDay(parseISO(a.data), d))
@@ -118,8 +156,19 @@ export function Agenda() {
         })}
       </div>
 
+      <div className="px-3 pb-2">
+        <button
+          onClick={montarSemana}
+          disabled={gerar.isPending}
+          className="btn-ghost w-full text-sm flex items-center justify-center gap-2"
+        >
+          <CalendarPlus size={16} />
+          {gerar.isPending ? 'Gerando…' : 'Montar semana (horários fixos)'}
+        </button>
+      </div>
+
       {isLoading ? (
-        <Carregando />
+        <SkeletonLista linhas={4} />
       ) : (
         <div className="grid grid-cols-2 gap-2 px-3">
           {profissionais.map((prof) => {
@@ -203,7 +252,6 @@ function CardAgendamento({
     >
       <div className="flex items-center gap-1 text-xs font-semibold text-zinc-300">
         <Clock size={12} /> {ag.hora}
-        <span className="text-zinc-600">· {duracaoLabel(ag.duracao_min)}</span>
       </div>
       <div className="text-sm font-medium text-zinc-100 truncate mt-0.5">
         {paciente?.nome ?? '—'}
@@ -230,6 +278,7 @@ function ModalAgendamento({
   const salvar = useSalvarAgendamento()
   const excluir = useExcluirAgendamento()
   const marcar = useMarcarPresenca()
+  const { toast, confirmar } = useUI()
 
   // só pacientes do profissional da coluna (responsável), em ordem alfabética
   const pacientesProf = pacientes.filter((p) => p.profissional_id === profissionalId)
@@ -237,9 +286,13 @@ function ModalAgendamento({
   const [pacienteId, setPacienteId] = useState(agendamento?.paciente_id ?? '')
   const [data, setData] = useState(agendamento?.data ?? dataPadrao)
   const [hora, setHora] = useState(agendamento?.hora ?? '14:00')
-  const [duracao, setDuracao] = useState(agendamento?.duracao_min ?? 60)
+  const [evolucao, setEvolucao] = useState(agendamento?.evolucao ?? '')
 
   const pacienteSel = pacientes.find((p) => p.id === pacienteId)
+
+  // mudou a data ou a hora em relação ao original → é uma remarcação (move)
+  const remarcando =
+    !!agendamento && (data !== agendamento.data || hora !== agendamento.hora)
 
   async function salvarAg() {
     if (!pacienteId) return
@@ -249,21 +302,24 @@ function ModalAgendamento({
       profissional_id: profissionalId,
       data,
       hora,
-      duracao_min: duracao,
-      ...(agendamento ? {} : { status: 'agendado' }),
+      duracao_min: agendamento?.duracao_min ?? DURACAO_PADRAO,
+      evolucao: evolucao.trim() || null,
+      // ao remarcar, reativa como 'agendado'; novo atendimento também
+      ...(agendamento ? (remarcando ? { status: 'agendado' } : {}) : { status: 'agendado' }),
     })
+    toast(remarcando ? 'Atendimento remarcado' : agendamento ? 'Alterações salvas' : 'Atendimento agendado')
     onFechar()
   }
 
   async function marcarPresenca(status: 'veio' | 'nao_veio') {
     if (!agendamento || !pacienteSel) return
-    await marcar.mutateAsync({ agendamento, paciente: pacienteSel, status })
-    onFechar()
-  }
-
-  async function remarcar() {
-    if (!agendamento) return
-    await salvar.mutateAsync({ id: agendamento.id, status: 'remarcado' })
+    await marcar.mutateAsync({
+      agendamento,
+      paciente: pacienteSel,
+      status,
+      evolucao: evolucao.trim() || null,
+    })
+    toast(status === 'veio' ? 'Presença confirmada' : 'Marcado como faltou', status === 'veio' ? 'ok' : 'info')
     onFechar()
   }
 
@@ -295,28 +351,46 @@ function ModalAgendamento({
           )}
         </div>
 
-        <div className="grid grid-cols-3 gap-2">
-          <div className="col-span-1">
+        <div className="grid grid-cols-2 gap-2">
+          <div>
             <label className="label">Hora</label>
             <input type="time" value={hora} onChange={(e) => setHora(e.target.value)} className="w-full" />
           </div>
-          <div className="col-span-1">
-            <label className="label">Duração</label>
-            <select value={duracao} onChange={(e) => setDuracao(Number(e.target.value))} className="w-full">
-              {[30, 45, 60, 90, 120].map((m) => (
-                <option key={m} value={m}>{duracaoLabel(m)}</option>
-              ))}
-            </select>
-          </div>
-          <div className="col-span-1">
+          <div>
             <label className="label">Data</label>
             <input type="date" value={data} onChange={(e) => setData(e.target.value)} className="w-full" />
           </div>
         </div>
+        <p className="text-[11px] text-zinc-500 -mt-2">Cada atendimento dura 1 hora.</p>
+
+        {agendamento && (
+          <div>
+            <label className="label">Evolução da sessão (prontuário)</label>
+            <textarea
+              value={evolucao}
+              onChange={(e) => setEvolucao(e.target.value)}
+              rows={3}
+              className="w-full resize-none"
+              placeholder="O que foi feito na sessão, evolução do paciente, observações…"
+            />
+            <p className="text-[11px] text-zinc-500 mt-1">
+              Salvo ao marcar presença ou em “Salvar alterações”. Fica no histórico do paciente.
+            </p>
+          </div>
+        )}
 
         <button onClick={salvarAg} disabled={salvar.isPending || !pacienteId} className="btn-ouro w-full">
-          {agendamento ? 'Salvar alterações' : 'Agendar'}
+          {!agendamento
+            ? 'Agendar'
+            : remarcando
+              ? `Remarcar para ${data.split('-').reverse().join('/')} ${hora}`
+              : 'Salvar alterações'}
         </button>
+        {agendamento && !remarcando && (
+          <p className="text-[11px] text-zinc-500 text-center -mt-2">
+            Para remarcar, mude a data e/ou a hora acima.
+          </p>
+        )}
 
         {agendamento && (
           <div className="space-y-2 pt-2 border-t border-white/10">
@@ -335,22 +409,23 @@ function ModalAgendamento({
                 <XIcon size={18} /> Não veio
               </button>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <button onClick={remarcar} className="btn-ghost text-sm">
-                Remarcar
-              </button>
-              <button
-                onClick={async () => {
-                  if (confirm('Excluir este atendimento?')) {
-                    await excluir.mutateAsync(agendamento.id)
-                    onFechar()
-                  }
-                }}
-                className="rounded-xl py-2.5 text-sm font-medium bg-white/5 text-red-400 hover:bg-red-500/10 flex items-center justify-center gap-1.5"
-              >
-                <Trash2 size={16} /> Excluir
-              </button>
-            </div>
+            <button
+              onClick={async () => {
+                const ok = await confirmar({
+                  titulo: 'Excluir atendimento?',
+                  confirmar: 'Excluir',
+                  perigo: true,
+                })
+                if (ok) {
+                  await excluir.mutateAsync(agendamento.id)
+                  toast('Atendimento excluído')
+                  onFechar()
+                }
+              }}
+              className="w-full rounded-xl py-2.5 text-sm font-medium bg-white/5 text-red-400 hover:bg-red-500/10 flex items-center justify-center gap-1.5"
+            >
+              <Trash2 size={16} /> Excluir
+            </button>
           </div>
         )}
       </div>

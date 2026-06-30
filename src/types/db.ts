@@ -16,6 +16,7 @@ export interface Profissional {
 export interface Paciente {
   id: string
   nome: string
+  telefone: string | null
   profissional_id: string
   tipo_valor: TipoValor
   valor: number
@@ -46,6 +47,7 @@ export interface Agendamento {
   status: StatusAgendamento
   valor_cobrado: number | null
   pago: boolean
+  evolucao: string | null // anotação clínica da sessão (prontuário)
   created_at: string
   updated_at: string
 }
