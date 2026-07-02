@@ -17,6 +17,7 @@ import {
   Clock,
   Trash2,
   CalendarPlus,
+  Loader2,
 } from 'lucide-react'
 import { Header, Modal, SkeletonLista } from '../components/ui'
 import { useUI } from '../components/Toaster'
@@ -287,6 +288,8 @@ function ModalAgendamento({
   const [data, setData] = useState(agendamento?.data ?? dataPadrao)
   const [hora, setHora] = useState(agendamento?.hora ?? '14:00')
   const [evolucao, setEvolucao] = useState(agendamento?.evolucao ?? '')
+  // qual botão de presença está enviando (para o loading só nele)
+  const [enviandoPresenca, setEnviandoPresenca] = useState<'veio' | 'nao_veio' | null>(null)
 
   const pacienteSel = pacientes.find((p) => p.id === pacienteId)
 
@@ -312,15 +315,21 @@ function ModalAgendamento({
   }
 
   async function marcarPresenca(status: 'veio' | 'nao_veio') {
-    if (!agendamento || !pacienteSel) return
-    await marcar.mutateAsync({
-      agendamento,
-      paciente: pacienteSel,
-      status,
-      evolucao: evolucao.trim() || null,
-    })
-    toast(status === 'veio' ? 'Presença confirmada' : 'Marcado como faltou', status === 'veio' ? 'ok' : 'info')
-    onFechar()
+    if (!agendamento || !pacienteSel || enviandoPresenca) return
+    setEnviandoPresenca(status)
+    try {
+      await marcar.mutateAsync({
+        agendamento,
+        paciente: pacienteSel,
+        status,
+        evolucao: evolucao.trim() || null,
+      })
+      toast(status === 'veio' ? 'Presença confirmada' : 'Marcado como faltou', status === 'veio' ? 'ok' : 'info')
+      onFechar()
+    } catch {
+      toast('Não deu pra salvar. Confira a conexão e tente de novo.', 'erro')
+      setEnviandoPresenca(null)
+    }
   }
 
   return (
@@ -398,15 +407,27 @@ function ModalAgendamento({
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => marcarPresenca('veio')}
-                className="rounded-xl py-2.5 font-semibold border border-emerald-500/40 bg-emerald-500/10 text-emerald-400 flex items-center justify-center gap-1.5"
+                disabled={!!enviandoPresenca}
+                className="rounded-xl py-2.5 font-semibold border border-emerald-500/40 bg-emerald-500/10 text-emerald-400 flex items-center justify-center gap-1.5 transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <Check size={18} /> Veio
+                {enviandoPresenca === 'veio' ? (
+                  <Loader2 size={18} className="animate-spin" />
+                ) : (
+                  <Check size={18} />
+                )}
+                {enviandoPresenca === 'veio' ? 'Confirmando…' : 'Veio'}
               </button>
               <button
                 onClick={() => marcarPresenca('nao_veio')}
-                className="rounded-xl py-2.5 font-semibold border border-red-500/40 bg-red-500/10 text-red-400 flex items-center justify-center gap-1.5"
+                disabled={!!enviandoPresenca}
+                className="rounded-xl py-2.5 font-semibold border border-red-500/40 bg-red-500/10 text-red-400 flex items-center justify-center gap-1.5 transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <XIcon size={18} /> Não veio
+                {enviandoPresenca === 'nao_veio' ? (
+                  <Loader2 size={18} className="animate-spin" />
+                ) : (
+                  <XIcon size={18} />
+                )}
+                {enviandoPresenca === 'nao_veio' ? 'Salvando…' : 'Não veio'}
               </button>
             </div>
             <button
