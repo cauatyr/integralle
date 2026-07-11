@@ -17,6 +17,11 @@ import { periodoDoCiclo, descricaoCiclo, type Periodo } from '../lib/ciclo'
 import { montarMensagemFechamento } from '../lib/mensagem'
 import { dataCurta, dataLonga, moeda } from '../lib/format'
 
+// Parte visual do "Gerar PDF" desativada a pedido (2026-07-11).
+// O código do PDF está PRESERVADO (src/pdf/FechamentoPDF.tsx + gerarPdf abaixo).
+// Para reativar: troque para true e religue o toggle em Ajustes (Config.tsx).
+const MOSTRAR_BOTAO_PDF = false
+
 export function Fechamentos() {
   const { data: pacientes = [], isLoading } = usePacientes()
   const elegiveis = useMemo(
@@ -271,7 +276,7 @@ function DetalheFechamento({ paciente, onFechar }: { paciente: Paciente; onFecha
               {copiado ? 'Copiado!' : 'Copiar mensagem'}
             </button>
 
-            {config?.pdf_habilitado && (
+            {MOSTRAR_BOTAO_PDF && config?.pdf_habilitado && (
               <button
                 onClick={gerarPdf}
                 disabled={gerandoPdf || qtd === 0}

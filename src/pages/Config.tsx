@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, FileText, LogOut } from 'lucide-react'
+import { ArrowLeft, LogOut } from 'lucide-react'
 import { Header, Carregando } from '../components/ui'
 import { Logo } from '../components/Logo'
 import { useConfig, useSalvarConfig } from '../hooks/data'
@@ -30,7 +30,12 @@ export function Config() {
             <Logo tamanho={52} />
           </div>
 
-          {/* Toggle do PDF */}
+          {/*
+            Toggle do PDF desativado a pedido (2026-07-11) — parte visual removida.
+            O código do PDF continua no projeto (src/pdf/FechamentoPDF.tsx + gerarPdf
+            em Fechamentos). Para reativar: descomente este bloco, volte o import do
+            FileText e ponha MOSTRAR_BOTAO_PDF = true em Fechamentos.tsx.
+
           <div className="card p-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <FileText size={20} className="text-ouro" />
@@ -52,6 +57,7 @@ export function Config() {
               />
             </button>
           </div>
+          */}
 
           {/* Horário de funcionamento */}
           <div className="card p-4 space-y-3">
