@@ -13,6 +13,7 @@ interface AuthCtx {
   carregando: boolean
   entrar: (email: string, senha: string) => Promise<void>
   sair: () => Promise<void>
+  criarConta: (email: string, senha: string) => Promise<{ precisaConfirmar: boolean }>
 }
 
 const Ctx = createContext<AuthCtx>({
@@ -20,6 +21,7 @@ const Ctx = createContext<AuthCtx>({
   carregando: true,
   entrar: async () => {},
   sair: async () => {},
+  criarConta: async () => ({ precisaConfirmar: false }),
 })
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -49,8 +51,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut()
   }
 
+  /**
+   * Cria uma conta nova de acesso ao app.
+   *
+   * Atenção: a RLS libera tudo para qualquer usuário autenticado, então toda
+   * conta criada aqui enxerga agenda, pacientes, prontuários e financeiro.
+   *
+   * `precisaConfirmar` vem true quando o projeto do Supabase está com
+   * "Confirm email" ligado — nesse caso o signUp não devolve sessão e a pessoa
+   * só entra depois de clicar no link enviado por e-mail.
+   */
+  async function criarConta(email: string, senha: string) {
+    const { data, error } = await supabase.auth.signUp({ email, password: senha })
+    if (error) throw error
+
+    // Com proteção contra enumeração de e-mails, o Supabase responde "sucesso"
+    // para um e-mail já cadastrado, mas devolve a lista de identities vazia.
+    if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+      throw new Error('EMAIL_JA_CADASTRADO')
+    }
+
+    return { precisaConfirmar: !data.session }
+  }
+
   return (
-    <Ctx.Provider value={{ session, carregando, entrar, sair }}>
+    <Ctx.Provider value={{ session, carregando, entrar, sair, criarConta }}>
       {children}
     </Ctx.Provider>
   )
